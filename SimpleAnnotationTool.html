@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Image Annotation Tool</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+        }
+        .container {
+            display: flex;
+            height: 100vh;
+            width: 100%;
+        }
+        .main-panel {
+            flex: 3;
+            padding: 20px;
+            overflow: auto;
+            height: calc(100vh - 40px);
+        }
+        .sidebar {
+            flex: 1;
+            background-color: #f0f0f0;
+            padding: 20px;
+            border-left: 1px solid #ddd;
+            overflow-y: auto;
+            height: calc(100vh - 40px);
+        }
+        .canvas-wrapper {
+            position: relative;
+            border: 1px solid #ccc;
+            margin-bottom: 20px;
+            overflow: auto;
+            max-height: 70vh;
+            min-height: 300px;
+            background-color: #eee;
+        }
+        canvas {
+            display: block;
+        }
+        .btn {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 8px 16px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 14px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        .btn-danger {
+            background-color: #f44336;
+        }
+        .btn-info {
+            background-color: #2196F3;
+        }
+        .btn-warning {
+            background-color: #ff9800;
+        }
+        .rect-item {
+            background-color: white;
+            border-left: 4px solid #4CAF50;
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .rect-item.selected {
+            background-color: #e7f3fe;
+            box-shadow: 0 0 5px rgba(0,0,0,0.2);
+        }
+        #status {
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            background-color: #e7f3fe;
+            border-left: 6px solid #2196F3;
+        }
+        .controls {
+            margin-bottom: 20px;
+        }
+        .multi-controls {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #f9f9f9;
+            border-radius: 4px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="main-panel">
+            <h1>Simple Image Annotation Tool</h1>
+            
+            <div class="controls">
+                <input type="file" id="imageUpload" accept="image/*">
+                <button class="btn" id="drawMode">Draw Mode</button>
+                <button class="btn" id="selectMode">Select Mode</button>
+            </div>
+            
+            <div id="status">Upload an image to start</div>
+            
+            <div class="canvas-wrapper" id="canvasWrapper">
+                <canvas id="canvas"></canvas>
+            </div>
+        </div>
+        
+        <div class="sidebar">
+            <h2>Annotations</h2>
+            
+            <div class="multi-controls" id="multiControls">
+                <div id="selectionCount">0 rectangles selected</div>
+                <button class="btn btn-warning" id="duplicateSelected">Duplicate Selected</button>
+                <button class="btn btn-danger" id="deleteSelected">Delete Selected</button>
+                <button class="btn" id="deselectAll">Deselect All</button>
+            </div>
+            
+            <div id="rectList"></div>
+            <button class="btn btn-info" id="downloadJSON">Download JSON</button>
+        </div>
+    </div>
+
+    <script>
+        // DOM Elements
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const canvasWrapper = document.getElementById('canvasWrapper');
+        const imageUpload = document.getElementById('imageUpload');
+        const statusEl = document.getElementById('status');
+        const rectListEl = document.getElementById('rectList');
+        const multiControls = document.getElementById('multiControls');
+        const selectionCount = document.getElementById('selectionCount');
+        
+        // Buttons
+        const drawModeBtn = document.getElementById('drawMode');
+        const selectModeBtn = document.getElementById('selectMode');
+        const duplicateSelectedBtn = document.getElementById('duplicateSelected');
+        const deleteSelectedBtn = document.getElementById('deleteSelected');
+        const deselectAllBtn = document.getElementById('deselectAll');
+        const downloadJSONBtn = document.getElementById('downloadJSON');
+        
+        // State variables
+        let image = null;
+        let rectangles = [];
+        let selectedRects = new Set();
+        let mode = 'draw';
+        let isDrawing = false;
+        let isDragging = false;
+        let startX = 0;
+        let startY = 0;
+        let draggedRect = null;
+        let dragOffsetX = 0;
+        let dragOffsetY = 0;
+        
+        // Load image
+        imageUpload.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    const img = new Image();
+                    img.onload = function() {
+                        image = img;
+                        resizeCanvas();
+                        drawAll();
+                        statusEl.textContent = 'Image loaded. Draw rectangles by clicking and dragging.';
+                    };
+                    img.src = event.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+        
+        // Resize canvas to match image
+        function resizeCanvas() {
+            if (image) {
+                canvas.width = image.width;
+                canvas.height = image.height;
+            }
+        }
+        
+        // Draw everything
+        function drawAll() {
+            if (!image) return;
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw image
+            ctx.drawImage(image, 0, 0);
+            
+            // Draw rectangles
+            rectangles.forEach(rect => {
+                ctx.strokeStyle = rect.color;
+                ctx.lineWidth = selectedRects.has(rect) ? 3 : 2;
+                
+                if (selectedRects.has(rect)) {
+                    ctx.setLineDash([5, 3]);
+                } else {
+                    ctx.setLineDash([]);
+                }
+                
+                ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+                
+                // Draw label
+                ctx.font = '14px Arial';
+                ctx.fillStyle = rect.color;
+                ctx.setLineDash([]);
+                ctx.fillText(rect.name, rect.x, rect.y - 5);
+            });
+            
+            ctx.setLineDash([]);
+        }
+        
+        // Generate random color
+        function getRandomColor() {
+            const colors = [
+                '#FF0000', '#00FF00', '#0000FF', '#FFFF00', 
+                '#FF00FF', '#00FFFF', '#FF8000', '#8000FF'
+            ];
+            return colors[Math.floor(Math.random() * colors.length)];
+        }
+        
+        // Check if point is inside rectangle
+        function isPointInRect(x, y, rect) {
+            return (
+                x >= rect.x && 
+                x <= rect.x + rect.width && 
+                y >= rect.y && 
+                y <= rect.y + rect.height
+            );
+        }
+        
+        // Update selection count
+        function updateSelectionUI() {
+            if (selectedRects.size > 0) {
+                multiControls.style.display = 'block';
+                selectionCount.textContent = `${selectedRects.size} rectangle${selectedRects.size !== 1 ? 's' : ''} selected`;
+            } else {
+                multiControls.style.display = 'none';
+            }
+            
+            drawAll();
+            updateRectList();
+        }
+        
+        // Update rectangle list in sidebar
+        function updateRectList() {
+            rectListEl.innerHTML = '';
+            
+            if (rectangles.length === 0) {
+                rectListEl.innerHTML = '<div>No rectangles yet</div>';
+                return;
+            }
+            
+            rectangles.forEach((rect, index) => {
+                const rectItem = document.createElement('div');
+                rectItem.className = 'rect-item';
+                
+                if (selectedRects.has(rect)) {
+                    rectItem.classList.add('selected');
+                }
+                
+                rectItem.style.borderLeftColor = rect.color;
+                
+                rectItem.innerHTML = `
+                    <div><strong>${rect.name}</strong></div>
+                    <div>Position: (${Math.round(rect.x)}, ${Math.round(rect.y)})</div>
+                    <div>Size: ${Math.round(rect.width)} × ${Math.round(rect.height)}</div>
+                    <button class="btn btn-warning duplicate-btn">Duplicate</button>
+                    <button class="btn btn-danger delete-btn">Delete</button>
+                `;
+                
+                // Rectangle selection
+                rectItem.addEventListener('click', function(e) {
+                    if (e.target.tagName !== 'BUTTON') {
+                        if (e.ctrlKey || e.metaKey) {
+                            // Toggle selection
+                            if (selectedRects.has(rect)) {
+                                selectedRects.delete(rect);
+                            } else {
+                                selectedRects.add(rect);
+                            }
+                        } else {
+                            // Single select
+                            selectedRects.clear();
+                            selectedRects.add(rect);
+                        }
+                        
+                        updateSelectionUI();
+                    }
+                });
+                
+                // Duplicate button
+                const duplicateBtn = rectItem.querySelector('.duplicate-btn');
+                duplicateBtn.addEventListener('click', function() {
+                    const newRect = { ...rect };
+                    newRect.name = `rect_${Math.floor(1000 + Math.random() * 9000)}`;
+                    newRect.color = getRandomColor();
+                    newRect.x += 20;
+                    newRect.y += 20;
+                    
+                    // Ensure within bounds
+                    if (image) {
+                        if (newRect.x + newRect.width > image.width) {
+                            newRect.x = Math.max(0, image.width - newRect.width);
+                        }
+                        if (newRect.y + newRect.height > image.height) {
+                            newRect.y = Math.max(0, image.height - newRect.height);
+                        }
+                    }
+                    
+                    rectangles.push(newRect);
+                    selectedRects.clear();
+                    selectedRects.add(newRect);
+                    
+                    // Switch to select mode
+                    mode = 'select';
+                    drawModeBtn.classList.remove('active');
+                    selectModeBtn.classList.add('active');
+                    
+                    updateSelectionUI();
+                    statusEl.textContent = `Duplicated as ${newRect.name}`;
+                });
+                
+                // Delete button
+                const deleteBtn = rectItem.querySelector('.delete-btn');
+                deleteBtn.addEventListener('click', function() {
+                    rectangles.splice(index, 1);
+                    if (selectedRects.has(rect)) {
+                        selectedRects.delete(rect);
+                    }
+                    updateSelectionUI();
+                    statusEl.textContent = `Deleted ${rect.name}`;
+                });
+                
+                rectListEl.appendChild(rectItem);
+            });
+        }
+        
+        // Mode control
+        drawModeBtn.addEventListener('click', function() {
+            mode = 'draw';
+            drawModeBtn.classList.add('active');
+            selectModeBtn.classList.remove('active');
+            canvas.style.cursor = 'crosshair';
+            statusEl.textContent = 'Draw Mode: Click and drag to create rectangles';
+        });
+        
+        selectModeBtn.addEventListener('click', function() {
+            mode = 'select';
+            selectModeBtn.classList.add('active');
+            drawModeBtn.classList.remove('active');
+            canvas.style.cursor = 'default';
+            statusEl.textContent = 'Select Mode: Click to select, drag to move rectangles';
+        });
+        
+        // Duplicate selected rectangles
+        duplicateSelectedBtn.addEventListener('click', function() {
+            if (selectedRects.size === 0) return;
+            
+            const selectedArray = Array.from(selectedRects);
+            const newRects = [];
+            
+            selectedArray.forEach(rect => {
+                const newRect = { ...rect };
+                newRect.name = `rect_${Math.floor(1000 + Math.random() * 9000)}`;
+                newRect.color = getRandomColor();
+                newRect.x += 20;
+                newRect.y += 20;
+                
+                // Ensure within bounds
+                if (image) {
+                    if (newRect.x + newRect.width > image.width) {
+                        newRect.x = Math.max(0, image.width - newRect.width);
+                    }
+                    if (newRect.y + newRect.height > image.height) {
+                        newRect.y = Math.max(0, image.height - newRect.height);
+                    }
+                }
+                
+                newRects.push(newRect);
+            });
+            
+            // Add new rectangles to the array
+            rectangles = rectangles.concat(newRects);
+            
+            // Select the new rectangles
+            selectedRects.clear();
+            newRects.forEach(rect => selectedRects.add(rect));
+            
+            updateSelectionUI();
+            statusEl.textContent = `Duplicated ${newRects.length} rectangle${newRects.length !== 1 ? 's' : ''}`;
+        });
+        
+        // Delete selected rectangles
+        deleteSelectedBtn.addEventListener('click', function() {
+            if (selectedRects.size === 0) return;
+            
+            rectangles = rectangles.filter(rect => !selectedRects.has(rect));
+            selectedRects.clear();
+            
+            updateSelectionUI();
+            statusEl.textContent = 'Deleted selected rectangles';
+        });
+        
+        // Deselect all
+        deselectAllBtn.addEventListener('click', function() {
+            selectedRects.clear();
+            updateSelectionUI();
+            statusEl.textContent = 'Deselected all rectangles';
+        });
+        
+        // Download JSON
+        downloadJSONBtn.addEventListener('click', function() {
+            if (rectangles.length === 0) {
+                alert('No rectangles to download');
+                return;
+            }
+            
+            // Prepare JSON data
+            const jsonData = rectangles.map(rect => ({
+                name: rect.name,
+                coordinates: {
+                    x1: Math.round(rect.x),
+                    y1: Math.round(rect.y),
+                    x2: Math.round(rect.x + rect.width),
+                    y2: Math.round(rect.y + rect.height)
+                }
+            }));
+            
+            try {
+                const dataStr = "data:text/json;charset=utf-8," + 
+                    encodeURIComponent(JSON.stringify(jsonData, null, 2));
+                
+                const downloadAnchor = document.createElement('a');
+                downloadAnchor.setAttribute("href", dataStr);
+                downloadAnchor.setAttribute("download", "annotations.json");
+                document.body.appendChild(downloadAnchor);
+                downloadAnchor.click();
+                downloadAnchor.remove();
+                
+                statusEl.textContent = `Downloaded ${rectangles.length} annotations as JSON`;
+            } catch (error) {
+                console.error("Download error:", error);
+                statusEl.textContent = "Error downloading JSON";
+            }
+        });
+        
+        // Canvas event handlers
+        canvas.addEventListener('mousedown', function(e) {
+            if (!image) return;
+            
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            if (mode === 'draw') {
+                // Start drawing a rectangle
+                isDrawing = true;
+                startX = x;
+                startY = y;
+                statusEl.textContent = 'Release to complete the rectangle';
+            } else if (mode === 'select') {
+                // Check if clicked on a rectangle
+                let clickedRect = null;
+                
+                // Check in reverse (top-most first)
+                for (let i = rectangles.length - 1; i >= 0; i--) {
+                    if (isPointInRect(x, y, rectangles[i])) {
+                        clickedRect = rectangles[i];
+                        break;
+                    }
+                }
+                
+                if (clickedRect) {
+                    // Handle selection
+                    if (e.ctrlKey || e.metaKey) {
+                        // Toggle selection
+                        if (selectedRects.has(clickedRect)) {
+                            selectedRects.delete(clickedRect);
+                        } else {
+                            selectedRects.add(clickedRect);
+                        }
+                    } else {
+                        // Single select unless clicking already selected rect
+                        if (!(selectedRects.size > 1 && selectedRects.has(clickedRect))) {
+                            selectedRects.clear();
+                        }
+                        selectedRects.add(clickedRect);
+                    }
+                    
+                    // Set up dragging
+                    isDragging = true;
+                    draggedRect = clickedRect;
+                    dragOffsetX = x - clickedRect.x;
+                    dragOffsetY = y - clickedRect.y;
+                    
+                    canvas.style.cursor = 'move';
+                } else if (!e.ctrlKey && !e.metaKey) {
+                    // Clicked empty space - clear selection
+                    selectedRects.clear();
+                }
+                
+                updateSelectionUI();
+            }
+        });
+        
+        canvas.addEventListener('mousemove', function(e) {
+            if (!image) return;
+            
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            if (mode === 'draw' && isDrawing) {
+                // Drawing temporary rectangle
+                const width = x - startX;
+                const height = y - startY;
+                
+                drawAll();
+                
+                // Draw current rectangle
+                ctx.strokeStyle = '#00FFFF';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(
+                    width >= 0 ? startX : x,
+                    height >= 0 ? startY : y,
+                    Math.abs(width),
+                    Math.abs(height)
+                );
+            } else if (mode === 'select' && isDragging && draggedRect) {
+                // Move selected rectangles
+                const deltaX = (x - dragOffsetX) - draggedRect.x;
+                const deltaY = (y - dragOffsetY) - draggedRect.y;
+                
+                selectedRects.forEach(rect => {
+                    rect.x += deltaX;
+                    rect.y += deltaY;
+                    
+                    // Keep in bounds
+                    if (rect.x < 0) rect.x = 0;
+                    if (rect.y < 0) rect.y = 0;
+                    if (image) {
+                        if (rect.x + rect.width > image.width) {
+                            rect.x = image.width - rect.width;
+                        }
+                        if (rect.y + rect.height > image.height) {
+                            rect.y = image.height - rect.height;
+                        }
+                    }
+                });
+                
+                // Update reference rect position for next move
+                draggedRect.x = x - dragOffsetX;
+                draggedRect.y = y - dragOffsetY;
+                
+                // Keep in bounds
+                if (draggedRect.x < 0) draggedRect.x = 0;
+                if (draggedRect.y < 0) draggedRect.y = 0;
+                if (image) {
+                    if (draggedRect.x + draggedRect.width > image.width) {
+                        draggedRect.x = image.width - draggedRect.width;
+                    }
+                    if (draggedRect.y + draggedRect.height > image.height) {
+                        draggedRect.y = image.height - draggedRect.height;
+                    }
+                }
+                
+                drawAll();
+            }
+        });
+        
+        canvas.addEventListener('mouseup', function(e) {
+            if (!image) return;
+            
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            if (mode === 'draw' && isDrawing) {
+                // Finish rectangle
+                const width = x - startX;
+                const height = y - startY;
+                
+                // Only add if big enough
+                if (Math.abs(width) > 5 && Math.abs(height) > 5) {
+                    const newRect = {
+                        x: width >= 0 ? startX : x,
+                        y: height >= 0 ? startY : y,
+                        width: Math.abs(width),
+                        height: Math.abs(height),
+                        name: `rect_${rectangles.length + 1}`,
+                        color: getRandomColor()
+                    };
+                    
+                    rectangles.push(newRect);
+                    selectedRects.clear();
+                    selectedRects.add(newRect);
+                    
+                    updateSelectionUI();
+                    statusEl.textContent = `Added rectangle ${newRect.name}`;
+                } else {
+                    statusEl.textContent = 'Rectangle too small, try again';
+                }
+                
+                isDrawing = false;
+            } else if (mode === 'select' && isDragging) {
+                // Finish moving
+                isDragging = false;
+                draggedRect = null;
+                canvas.style.cursor = 'default';
+                
+                updateRectList();
+                statusEl.textContent = `Moved ${selectedRects.size} rectangle${selectedRects.size !== 1 ? 's' : ''}`;
+            }
+        });
+        
+        // Set initial state
+        drawModeBtn.classList.add('active');
+        updateRectList();
+    </script>
+</body>
+</html>
