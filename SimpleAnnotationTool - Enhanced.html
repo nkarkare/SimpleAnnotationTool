@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced Image Annotation Tool</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+        }
+        .container {
+            display: flex;
+            height: 100vh;
+            width: 100%;
+        }
+        .main-panel {
+            flex: 3;
+            padding: 20px;
+            overflow: auto;
+            height: calc(100vh - 40px);
+        }
+        .sidebar {
+            flex: 1;
+            background-color: #f0f0f0;
+            padding: 20px;
+            border-left: 1px solid #ddd;
+            overflow-y: auto;
+            height: calc(100vh - 40px);
+        }
+        .canvas-wrapper {
+            position: relative;
+            border: 1px solid #ccc;
+            margin-bottom: 20px;
+            overflow: auto;
+            max-height: 70vh;
+            min-height: 300px;
+            background-color: #eee;
+        }
+        canvas {
+            display: block;
+        }
+        .btn {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 8px 16px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 14px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        .btn-danger {
+            background-color: #f44336;
+        }
+        .btn-info {
+            background-color: #2196F3;
+        }
+        .btn-warning {
+            background-color: #ff9800;
+        }
+        .rect-item {
+            background-color: white;
+            border-left: 4px solid #4CAF50;
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .rect-item.selected {
+            background-color: #e7f3fe;
+            box-shadow: 0 0 5px rgba(0,0,0,0.2);
+        }
+        #status {
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            background-color: #e7f3fe;
+            border-left: 6px solid #2196F3;
+        }
+        .controls {
+            margin-bottom: 20px;
+        }
+        .multi-controls {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #f9f9f9;
+            border-radius: 4px;
+            display: none;
+        }
+        .field-type {
+            margin-top: 5px;
+        }
+        .field-type select {
+            padding: 4px;
+            border-radius: 3px;
+            border: 1px solid #ccc;
+        }
+        .file-controls {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .hidden {
+            display: none;
+        }
+        .type-indicator {
+            display: inline-block;
+            margin-left: 5px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 12px;
+            color: white;
+        }
+        .type-text {
+            background-color: #2196F3;
+        }
+        .type-checkbox {
+            background-color: #FF9800;
+        }
+        .type-bubble {
+            background-color: #9C27B0;
+        }
+        .type-qrcode {
+            background-color: #607D8B;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="main-panel">
+            <h1>Enhanced Image Annotation Tool</h1>
+            
+            <div class="controls">
+                <div class="file-controls">
+                    <input type="file" id="imageUpload" accept="image/*">
+                    <span>or</span>
+                    <input type="file" id="jsonUpload" accept=".json">
+                    <label for="jsonUpload" class="btn btn-info">Load JSON</label>
+                </div>
+                
+                <div>
+                    <label for="defaultType">Default Field Type:</label>
+                    <select id="defaultType">
+                        <option value="text">Text</option>
+                        <option value="checkbox">Checkbox</option>
+                        <option value="bubble">Bubble</option>
+                        <option value="qrcode">QR Code</option>
+                    </select>
+                </div>
+                
+                <div style="margin-top: 10px;">
+                    <button class="btn" id="drawMode">Draw Mode</button>
+                    <button class="btn" id="selectMode">Select Mode</button>
+                </div>
+            </div>
+            
+            <div id="status">Upload an image to start</div>
+            
+            <div class="canvas-wrapper" id="canvasWrapper">
+                <canvas id="canvas"></canvas>
+            </div>
+        </div>
+        
+        <div class="sidebar">
+            <h2>Annotations</h2>
+            
+            <div class="multi-controls" id="multiControls">
+                <div id="selectionCount">0 rectangles selected</div>
+                <button class="btn btn-warning" id="duplicateSelected">Duplicate Selected</button>
+                <button class="btn btn-danger" id="deleteSelected">Delete Selected</button>
+                <button class="btn" id="deselectAll">Deselect All</button>
+                
+                <div style="margin-top: 10px;">
+                    <label for="bulkType">Change Type:</label>
+                    <select id="bulkType">
+                        <option value="text">Text</option>
+                        <option value="checkbox">Checkbox</option>
+                        <option value="bubble">Bubble</option>
+                        <option value="qrcode">QR Code</option>
+                    </select>
+                    <button class="btn" id="applyBulkType">Apply</button>
+                </div>
+            </div>
+            
+            <div id="rectList"></div>
+            <button class="btn btn-info" id="downloadJSON">Download JSON</button>
+        </div>
+    </div>
+
+    <script>
+        // DOM Elements
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const canvasWrapper = document.getElementById('canvasWrapper');
+        const imageUpload = document.getElementById('imageUpload');
+        const jsonUpload = document.getElementById('jsonUpload');
+        const statusEl = document.getElementById('status');
+        const rectListEl = document.getElementById('rectList');
+        const multiControls = document.getElementById('multiControls');
+        const selectionCount = document.getElementById('selectionCount');
+        const defaultTypeSelect = document.getElementById('defaultType');
+        const bulkTypeSelect = document.getElementById('bulkType');
+        
+        // Buttons
+        const drawModeBtn = document.getElementById('drawMode');
+        const selectModeBtn = document.getElementById('selectMode');
+        const duplicateSelectedBtn = document.getElementById('duplicateSelected');
+        const deleteSelectedBtn = document.getElementById('deleteSelected');
+        const deselectAllBtn = document.getElementById('deselectAll');
+        const downloadJSONBtn = document.getElementById('downloadJSON');
+        const applyBulkTypeBtn = document.getElementById('applyBulkType');
+        
+        // State variables
+        let image = null;
+        let rectangles = [];
+        let selectedRects = new Set();
+        let mode = 'draw';
+        let isDrawing = false;
+        let isDragging = false;
+        let startX = 0;
+        let startY = 0;
+        let draggedRect = null;
+        let dragOffsetX = 0;
+        let dragOffsetY = 0;
+        
+        // Load image
+        imageUpload.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    const img = new Image();
+                    img.onload = function() {
+                        image = img;
+                        resizeCanvas();
+                        drawAll();
+                        statusEl.textContent = 'Image loaded. Draw rectangles by clicking and dragging.';
+                    };
+                    img.src = event.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+        
+        // Load JSON file
+        jsonUpload.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    try {
+                        const jsonData = JSON.parse(event.target.result);
+                        
+                        // Process the JSON data
+                        loadRectanglesFromJSON(jsonData);
+                        statusEl.textContent = `Loaded ${rectangles.length} rectangles from JSON file.`;
+                        
+                        // Reset the file input to allow reloading the same file
+                        jsonUpload.value = '';
+                        
+                        drawAll();
+                        updateRectList();
+                    } catch (error) {
+                        console.error("Error parsing JSON:", error);
+                        statusEl.textContent = "Error loading JSON file. Check console for details.";
+                    }
+                };
+                reader.readAsText(file);
+            }
+        });
+        
+        // Convert JSON data to rectangles
+        function loadRectanglesFromJSON(jsonData) {
+            let newRectangles = [];
+            
+            // Process each rectangle
+            jsonData.forEach((item, index) => {
+                if (item.coordinates) {
+                    const coords = item.coordinates;
+                    // Check if coordinates are present
+                    if (coords.x1 !== undefined && coords.y1 !== undefined && 
+                        coords.x2 !== undefined && coords.y2 !== undefined) {
+                        
+                        // Create rectangle with appropriate properties
+                        const rect = {
+                            name: item.name || `rect_${index + 1}`,
+                            x: coords.x1,
+                            y: coords.y1,
+                            width: coords.x2 - coords.x1,
+                            height: coords.y2 - coords.y1,
+                            color: getRandomColor(),
+                            type: item.type || 'text' // Default to 'text' if not specified
+                        };
+                        
+                        newRectangles.push(rect);
+                    }
+                }
+            });
+            
+            // Replace current rectangles with loaded ones
+            rectangles = newRectangles;
+            selectedRects.clear();
+        }
+        
+        // Resize canvas to match image
+        function resizeCanvas() {
+            if (image) {
+                canvas.width = image.width;
+                canvas.height = image.height;
+            }
+        }
+        
+        // Draw everything
+        function drawAll() {
+            if (!image) return;
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw image
+            ctx.drawImage(image, 0, 0);
+            
+            // Draw rectangles
+            rectangles.forEach(rect => {
+                // Set style based on type
+                let strokeColor = rect.color;
+                let fillColor = 'rgba(0, 0, 0, 0)'; // Transparent by default
+                
+                // Different styles based on type
+                switch(rect.type) {
+                    case 'checkbox':
+                        fillColor = 'rgba(255, 152, 0, 0.1)'; // Orange with transparency
+                        break;
+                    case 'bubble':
+                        fillColor = 'rgba(156, 39, 176, 0.1)'; // Purple with transparency
+                        break;
+                    case 'qrcode':
+                        fillColor = 'rgba(96, 125, 139, 0.1)'; // Blue-gray with transparency
+                        break;
+                    case 'text':
+                    default:
+                        fillColor = 'rgba(33, 150, 243, 0.1)'; // Blue with transparency
+                        break;
+                }
+                
+                ctx.strokeStyle = strokeColor;
+                ctx.lineWidth = selectedRects.has(rect) ? 3 : 2;
+                
+                if (selectedRects.has(rect)) {
+                    ctx.setLineDash([5, 3]);
+                } else {
+                    ctx.setLineDash([]);
+                }
+                
+                // Fill rectangle with type-specific color
+                ctx.fillStyle = fillColor;
+                ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+                
+                // Stroke rectangle outline
+                ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+                
+                // Draw label with type indicator
+                ctx.font = '14px Arial';
+                ctx.fillStyle = rect.color;
+                ctx.setLineDash([]);
+                ctx.fillText(`${rect.name} (${rect.type})`, rect.x, rect.y - 5);
+                
+                // Draw type-specific icons or indicators
+                if (rect.type === 'checkbox') {
+                    // Draw a small checkbox icon
+                    const size = Math.min(rect.width, rect.height) / 4;
+                    const x = rect.x + 5;
+                    const y = rect.y + 5;
+                    ctx.strokeRect(x, y, size, size);
+                    
+                } else if (rect.type === 'bubble') {
+                    // Draw a small bubble icon
+                    const radius = Math.min(rect.width, rect.height) / 8;
+                    const x = rect.x + 5 + radius;
+                    const y = rect.y + 5 + radius;
+                    ctx.beginPath();
+                    ctx.arc(x, y, radius, 0, Math.PI * 2);
+                    ctx.stroke();
+                    
+                } else if (rect.type === 'qrcode') {
+                    // Draw a QR code pattern
+                    const size = Math.min(rect.width, rect.height) / 4;
+                    const x = rect.x + 5;
+                    const y = rect.y + 5;
+                    
+                    // Draw outer square
+                    ctx.strokeRect(x, y, size, size);
+                    
+                    // Draw inner pattern (simplified QR code look)
+                    const cellSize = size / 4;
+                    
+                    // Draw position detection patterns (corners)
+                    ctx.fillStyle = rect.color;
+                    
+                    // Top-left position detection pattern
+                    ctx.fillRect(x, y, cellSize * 3, cellSize);
+                    ctx.fillRect(x, y + cellSize, cellSize, cellSize * 2);
+                    ctx.fillRect(x + cellSize * 2, y + cellSize, cellSize, cellSize * 2);
+                    ctx.fillRect(x + cellSize, y + cellSize, cellSize, cellSize);
+                    
+                    // Draw some random "data" cells
+                    ctx.fillRect(x + cellSize * 2, y + cellSize * 3, cellSize, cellSize);
+                    ctx.fillRect(x + cellSize * 3, y + cellSize * 2, cellSize, cellSize);
+                }
+            });
+            
+            ctx.setLineDash([]);
+        }
+        
+        // Generate random color
+        function getRandomColor() {
+            const colors = [
+                '#FF0000', '#00FF00', '#0000FF', '#FFFF00', 
+                '#FF00FF', '#00FFFF', '#FF8000', '#8000FF'
+            ];
+            return colors[Math.floor(Math.random() * colors.length)];
+        }
+        
+        // Check if point is inside rectangle
+        function isPointInRect(x, y, rect) {
+            return (
+                x >= rect.x && 
+                x <= rect.x + rect.width && 
+                y >= rect.y && 
+                y <= rect.y + rect.height
+            );
+        }
+        
+        // Update selection count
+        function updateSelectionUI() {
+            if (selectedRects.size > 0) {
+                multiControls.style.display = 'block';
+                selectionCount.textContent = `${selectedRects.size} rectangle${selectedRects.size !== 1 ? 's' : ''} selected`;
+            } else {
+                multiControls.style.display = 'none';
+            }
+            
+            drawAll();
+            updateRectList();
+        }
+        
+        // Update rectangle list in sidebar
+        function updateRectList() {
+            rectListEl.innerHTML = '';
+            
+            if (rectangles.length === 0) {
+                rectListEl.innerHTML = '<div>No rectangles yet</div>';
+                return;
+            }
+            
+            rectangles.forEach((rect, index) => {
+                const rectItem = document.createElement('div');
+                rectItem.className = 'rect-item';
+                
+                if (selectedRects.has(rect)) {
+                    rectItem.classList.add('selected');
+                }
+                
+                rectItem.style.borderLeftColor = rect.color;
+                
+                // Type-specific class for styling
+                const typeClass = `type-${rect.type}`;
+                
+                rectItem.innerHTML = `
+                    <div>
+                        <strong>${rect.name}</strong>
+                        <span class="type-indicator ${typeClass}">${rect.type}</span>
+                    </div>
+                    <div>Position: (${Math.round(rect.x)}, ${Math.round(rect.y)})</div>
+                    <div>Size: ${Math.round(rect.width)} × ${Math.round(rect.height)}</div>
+                    <div class="field-type">
+                        <label>Type: 
+                            <select class="type-select">
+                                <option value="text" ${rect.type === 'text' ? 'selected' : ''}>Text</option>
+                                <option value="checkbox" ${rect.type === 'checkbox' ? 'selected' : ''}>Checkbox</option>
+                                <option value="bubble" ${rect.type === 'bubble' ? 'selected' : ''}>Bubble</option>
+                                <option value="qrcode" ${rect.type === 'qrcode' ? 'selected' : ''}>QR Code</option>
+                            </select>
+                        </label>
+                    </div>
+                    <div style="margin-top: 5px;">
+                        <button class="btn btn-warning duplicate-btn">Duplicate</button>
+                        <button class="btn btn-danger delete-btn">Delete</button>
+                    </div>
+                `;
+                
+                // Rectangle selection
+                rectItem.addEventListener('click', function(e) {
+                    if (e.target.tagName !== 'BUTTON' && e.target.tagName !== 'SELECT' && e.target.tagName !== 'OPTION') {
+                        if (e.ctrlKey || e.metaKey) {
+                            // Toggle selection
+                            if (selectedRects.has(rect)) {
+                                selectedRects.delete(rect);
+                            } else {
+                                selectedRects.add(rect);
+                            }
+                        } else {
+                            // Single select
+                            selectedRects.clear();
+                            selectedRects.add(rect);
+                        }
+                        
+                        updateSelectionUI();
+                    }
+                });
+                
+                // Type change handler
+                const typeSelect = rectItem.querySelector('.type-select');
+                typeSelect.addEventListener('change', function() {
+                    rect.type = this.value;
+                    drawAll();
+                    updateRectList(); // Refresh to update the type indicator
+                });
+                
+                // Duplicate button
+                const duplicateBtn = rectItem.querySelector('.duplicate-btn');
+                duplicateBtn.addEventListener('click', function() {
+                    const newRect = { ...rect };
+                    newRect.name = `rect_${Math.floor(1000 + Math.random() * 9000)}`;
+                    newRect.color = getRandomColor();
+                    newRect.x += 20;
+                    newRect.y += 20;
+                    
+                    // Ensure within bounds
+                    if (image) {
+                        if (newRect.x + newRect.width > image.width) {
+                            newRect.x = Math.max(0, image.width - newRect.width);
+                        }
+                        if (newRect.y + newRect.height > image.height) {
+                            newRect.y = Math.max(0, image.height - newRect.height);
+                        }
+                    }
+                    
+                    rectangles.push(newRect);
+                    selectedRects.clear();
+                    selectedRects.add(newRect);
+                    
+                    // Switch to select mode
+                    mode = 'select';
+                    drawModeBtn.classList.remove('active');
+                    selectModeBtn.classList.add('active');
+                    
+                    updateSelectionUI();
+                    statusEl.textContent = `Duplicated as ${newRect.name}`;
+                });
+                
+                // Delete button
+                const deleteBtn = rectItem.querySelector('.delete-btn');
+                deleteBtn.addEventListener('click', function() {
+                    rectangles.splice(index, 1);
+                    if (selectedRects.has(rect)) {
+                        selectedRects.delete(rect);
+                    }
+                    updateSelectionUI();
+                    statusEl.textContent = `Deleted ${rect.name}`;
+                });
+                
+                rectListEl.appendChild(rectItem);
+            });
+        }
+        
+        // Mode control
+        drawModeBtn.addEventListener('click', function() {
+            mode = 'draw';
+            drawModeBtn.classList.add('active');
+            selectModeBtn.classList.remove('active');
+            canvas.style.cursor = 'crosshair';
+            statusEl.textContent = 'Draw Mode: Click and drag to create rectangles';
+        });
+        
+        selectModeBtn.addEventListener('click', function() {
+            mode = 'select';
+            selectModeBtn.classList.add('active');
+            drawModeBtn.classList.remove('active');
+            canvas.style.cursor = 'default';
+            statusEl.textContent = 'Select Mode: Click to select, drag to move rectangles';
+        });
+        
+        // Apply bulk type changes
+        applyBulkTypeBtn.addEventListener('click', function() {
+            if (selectedRects.size === 0) return;
+            
+            const newType = bulkTypeSelect.value;
+            selectedRects.forEach(rect => {
+                rect.type = newType;
+            });
+            
+            drawAll();
+            updateRectList();
+            statusEl.textContent = `Changed ${selectedRects.size} rectangle(s) to type "${newType}"`;
+        });
+        
+        // Duplicate selected rectangles
+        duplicateSelectedBtn.addEventListener('click', function() {
+            if (selectedRects.size === 0) return;
+            
+            const selectedArray = Array.from(selectedRects);
+            const newRects = [];
+            
+            selectedArray.forEach(rect => {
+                const newRect = { ...rect };
+                newRect.name = `rect_${Math.floor(1000 + Math.random() * 9000)}`;
+                newRect.color = getRandomColor();
+                newRect.x += 20;
+                newRect.y += 20;
+                
+                // Ensure within bounds
+                if (image) {
+                    if (newRect.x + newRect.width > image.width) {
+                        newRect.x = Math.max(0, image.width - newRect.width);
+                    }
+                    if (newRect.y + newRect.height > image.height) {
+                        newRect.y = Math.max(0, image.height - newRect.height);
+                    }
+                }
+                
+                newRects.push(newRect);
+            });
+            
+            // Add new rectangles to the array
+            rectangles = rectangles.concat(newRects);
+            
+            // Select the new rectangles
+            selectedRects.clear();
+            newRects.forEach(rect => selectedRects.add(rect));
+            
+            updateSelectionUI();
+            statusEl.textContent = `Duplicated ${newRects.length} rectangle${newRects.length !== 1 ? 's' : ''}`;
+        });
+        
+        // Delete selected rectangles
+        deleteSelectedBtn.addEventListener('click', function() {
+            if (selectedRects.size === 0) return;
+            
+            rectangles = rectangles.filter(rect => !selectedRects.has(rect));
+            selectedRects.clear();
+            
+            updateSelectionUI();
+            statusEl.textContent = 'Deleted selected rectangles';
+        });
+        
+        // Deselect all
+        deselectAllBtn.addEventListener('click', function() {
+            selectedRects.clear();
+            updateSelectionUI();
+            statusEl.textContent = 'Deselected all rectangles';
+        });
+        
+        // Download JSON
+        downloadJSONBtn.addEventListener('click', function() {
+            if (rectangles.length === 0) {
+                alert('No rectangles to download');
+                return;
+            }
+            
+            // Prepare JSON data
+            const jsonData = rectangles.map(rect => ({
+                name: rect.name,
+                type: rect.type,
+                coordinates: {
+                    x1: Math.round(rect.x),
+                    y1: Math.round(rect.y),
+                    x2: Math.round(rect.x + rect.width),
+                    y2: Math.round(rect.y + rect.height)
+                }
+            }));
+            
+            try {
+                const dataStr = "data:text/json;charset=utf-8," + 
+                    encodeURIComponent(JSON.stringify(jsonData, null, 2));
+                
+                const downloadAnchor = document.createElement('a');
+                downloadAnchor.setAttribute("href", dataStr);
+                downloadAnchor.setAttribute("download", "annotations.json");
+                document.body.appendChild(downloadAnchor);
+                downloadAnchor.click();
+                downloadAnchor.remove();
+                
+                statusEl.textContent = `Downloaded ${rectangles.length} annotations as JSON`;
+            } catch (error) {
+                console.error("Download error:", error);
+                statusEl.textContent = "Error downloading JSON";
+            }
+        });
+        
+        // Canvas event handlers
+        canvas.addEventListener('mousedown', function(e) {
+            if (!image) return;
+            
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            if (mode === 'draw') {
+                // Start drawing a rectangle
+                isDrawing = true;
+                startX = x;
+                startY = y;
+                statusEl.textContent = 'Release to complete the rectangle';
+            } else if (mode === 'select') {
+                // Check if clicked on a rectangle
+                let clickedRect = null;
+                
+                // Check in reverse (top-most first)
+                for (let i = rectangles.length - 1; i >= 0; i--) {
+                    if (isPointInRect(x, y, rectangles[i])) {
+                        clickedRect = rectangles[i];
+                        break;
+                    }
+                }
+                
+                if (clickedRect) {
+                    // Handle selection
+                    if (e.ctrlKey || e.metaKey) {
+                        // Toggle selection
+                        if (selectedRects.has(clickedRect)) {
+                            selectedRects.delete(clickedRect);
+                        } else {
+                            selectedRects.add(clickedRect);
+                        }
+                    } else {
+                        // Single select unless clicking already selected rect
+                        if (!(selectedRects.size > 1 && selectedRects.has(clickedRect))) {
+                            selectedRects.clear();
+                        }
+                        selectedRects.add(clickedRect);
+                    }
+                    
+                    // Set up dragging
+                    isDragging = true;
+                    draggedRect = clickedRect;
+                    dragOffsetX = x - clickedRect.x;
+                    dragOffsetY = y - clickedRect.y;
+                    
+                    canvas.style.cursor = 'move';
+                } else if (!e.ctrlKey && !e.metaKey) {
+                    // Clicked empty space - clear selection
+                    selectedRects.clear();
+                }
+                
+                updateSelectionUI();
+            }
+        });
+        
+        canvas.addEventListener('mousemove', function(e) {
+            if (!image) return;
+            
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            if (mode === 'draw' && isDrawing) {
+                // Drawing temporary rectangle
+                const width = x - startX;
+                const height = y - startY;
+                
+                drawAll();
+                
+                // Draw current rectangle
+                ctx.strokeStyle = '#00FFFF';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(
+                    width >= 0 ? startX : x,
+                    height >= 0 ? startY : y,
+                    Math.abs(width),
+                    Math.abs(height)
+                );
+            } else if (mode === 'select' && isDragging && draggedRect) {
+                // Move selected rectangles
+                const deltaX = (x - dragOffsetX) - draggedRect.x;
+                const deltaY = (y - dragOffsetY) - draggedRect.y;
+                
+                selectedRects.forEach(rect => {
+                    rect.x += deltaX;
+                    rect.y += deltaY;
+                    
+                    // Keep in bounds
+                    if (rect.x < 0) rect.x = 0;
+                    if (rect.y < 0) rect.y = 0;
+                    if (image) {
+                        if (rect.x + rect.width > image.width) {
+                            rect.x = image.width - rect.width;
+                        }
+                        if (rect.y + rect.height > image.height) {
+                            rect.y = image.height - rect.height;
+                        }
+                    }
+                });
+                
+                // Update reference rect position for next move
+                draggedRect.x = x - dragOffsetX;
+                draggedRect.y = y - dragOffsetY;
+                
+                // Keep in bounds
+                if (draggedRect.x < 0) draggedRect.x = 0;
+                if (draggedRect.y < 0) draggedRect.y = 0;
+                if (image) {
+                    if (draggedRect.x + draggedRect.width > image.width) {
+                        draggedRect.x = image.width - draggedRect.width;
+                    }
+                    if (draggedRect.y + draggedRect.height > image.height) {
+                        draggedRect.y = image.height - draggedRect.height;
+                    }
+                }
+                
+                drawAll();
+            }
+        });
+        
+        canvas.addEventListener('mouseup', function(e) {
+            if (!image) return;
+            
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            if (mode === 'draw' && isDrawing) {
+                // Finish rectangle
+                const width = x - startX;
+                const height = y - startY;
+                
+                // Only add if big enough
+                if (Math.abs(width) > 5 && Math.abs(height) > 5) {
+                    const newRect = {
+                        x: width >= 0 ? startX : x,
+                        y: height >= 0 ? startY : y,
+                        width: Math.abs(width),
+                        height: Math.abs(height),
+                        name: `rect_${rectangles.length + 1}`,
+                        color: getRandomColor(),
+                        type: defaultTypeSelect.value // Use the selected default type
+                    };
+                    
+                    rectangles.push(newRect);
+                    selectedRects.clear();
+                    selectedRects.add(newRect);
+                    
+                    updateSelectionUI();
+                    statusEl.textContent = `Added ${newRect.type} field: ${newRect.name}`;
+                } else {
+                    statusEl.textContent = 'Rectangle too small, try again';
+                }
+                
+                isDrawing = false;
+            } else if (mode === 'select' && isDragging) {
+                // Finish moving
+                isDragging = false;
+                draggedRect = null;
+                canvas.style.cursor = 'default';
+                
+                updateRectList();
+                statusEl.textContent = `Moved ${selectedRects.size} rectangle${selectedRects.size !== 1 ? 's' : ''}`;
+            }
+        });
+        
+        // Set initial state
+        drawModeBtn.classList.add('active');
+        updateRectList();
+    </script>
+</body>
+</html>
